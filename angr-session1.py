@@ -1,19 +1,26 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
 # coding: utf-8
 '''
 Use this script to solve the collision challenge on http://pwnable.kr/play.php.
+
+Due to nature of challenge, your solved hash collision will likely be different.
 '''
 import angr #the main framework
 import claripy #the solver engine
 import signal
 import logging
+import os
+import codecs
+import hexdump
+
+script_directory = os.path.dirname(os.path.realpath(__file__))
 
 logging.getLogger('angr.manager').setLevel(logging.DEBUG)
 
 def killmyself():
     os.system('kill %d' % os.getpid())
 def sigint_handler(signum, frame):
-    print 'Stopping Execution for Debug. If you want to kill the programm issue: killmyself()'
+    print('Stopping Execution for Debug. If you want to kill the programm issue: killmyself()')
     if not "IPython" in sys.modules:
         import IPython
         IPython.embed()
@@ -21,7 +28,7 @@ def sigint_handler(signum, frame):
 signal.signal(signal.SIGINT, sigint_handler)
 
 # col-dyn-32 is a locally compiled version of the binary on the server.
-proj = angr.Project("/mnt/hgfs/Dropbox/Dev/ctf/col-dyn", auto_load_libs=False)
+proj = angr.Project(script_directory + "/col-dyn", auto_load_libs=False)
 
 argv = [proj.filename]   #argv[0]
 sym_arg_size = 20   #max number of bytes we'll try to solve for
@@ -56,26 +63,26 @@ found = simgr.found[0]
 When observing the binary running in gdb, it becomes apparent that the user input
 can be obtained through a pointer in rdi register.
 '''
-chunk1 = found.mem[found.regs.rdi].deref
-# 0x9539ef802c6dc9c9
-chunk2 = found.mem[found.regs.rdi+8].deref
-# 0x5990224028afaea0
-chunk2 = found.mem[found.regs.rdi+8+8].deref
-# 0xddf57fc3
+mem_pointer1 = found.mem[found.regs.rdi]
 
-'''
-Reverse order the bytes based on memory boundary (64bit = 8 byte)
-'''
-print chunk1[::-1].encode('hex')
-# c9c96d2c80ef3995
+'''eval allows us to derefence and save value into python variable.'''
+hash_chunk_1 = found.solver.eval( mem_pointer1.uint64_t.resolved, cast_to=bytes)
+'''Reverse order the bytes'''
+passcode = codecs.encode(hash_chunk_1[::-1],'hex')
 
-print chunk2[::-1].encode('hex')
-# a0aeaf2840229059
+mem_pointer2 = found.mem[found.regs.rdi+8]
+hash_chunk_2 = found.solver.eval( mem_pointer2.uint64_t.resolved, cast_to=bytes)
+passcode += codecs.encode(hash_chunk_2[::-1],'hex')
 
-print chunk3[::-1].encode('hex')
-# c37ff5dd
+mem_pointer3 = found.mem[found.regs.rdi+8+8]
+hash_chunk_3 = found.solver.eval( mem_pointer3.uint64_t.resolved, cast_to=bytes)
+passcode += codecs.encode(hash_chunk_3[:3:-1],'hex')
 
-# \xc9\xc9\x6d\x2c\x80\xef\x39\x95\xa0\xae\xaf\x28\x40\x22\x90\x59\xc3\x7f\xf5\xdd
+passcode_bytes = bytes.fromhex(passcode.decode())
+
+hexdump.hexdump(passcode_bytes)
+
+print('Passcode is {}.'.format(passcode))
 
 '''
 Now we submit the challenge to obtain the flag.
@@ -100,6 +107,7 @@ col@pwnable.kr's password:
 - files under /tmp can be erased anytime. make your directory under /tmp
 - to use peda, issue `source /usr/share/peda/peda.py` in gdb terminal
 Last login: Thu Oct 11 20:45:35 2018 from 207.148.113.134
-col@ubuntu:~$ ./col $(perl -e 'printf "\xc9\xc9\x6d\x2c\x80\xef\x39\x95\xa0\xae\xaf\x28\x40\x22\x90\x59\xc3\x7f\xf5\xdd"')
+col@ubuntu:~$ arg1=$(perl -e 'printf "\xc9\xc9\x6d\x2c\x80\xef\x39\x95\xa0\xae\xaf\x28\x40\x22\x90\x59\xc3\x7f\xf5\xdd"')
+col@ubuntu:~$ ./col "arg1"
 daddy! I just managed to create a hash collision :)
 '''
